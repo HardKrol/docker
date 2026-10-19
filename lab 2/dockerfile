@@ -1,0 +1,35 @@
+FROM python:3.11-alpine AS builder
+WORKDIR /src
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+FROM python:3.11-alpine
+
+ARG LAB_LOGIN
+ARG LAB_TOKEN
+
+LABEL org.lab.login=$LAB_LOGIN \
+      org.lab.token=$LAB_TOKEN
+
+ENV LAB_LOGIN=$LAB_LOGIN \
+    LAB_TOKEN=$LAB_TOKEN \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH=/home/abuser/.local/bin:$PATH
+
+RUN apk add --no-cache curl && \
+    adduser -D abuser
+
+WORKDIR /app
+
+COPY --from=builder --chown=abuser:abuser /root/.local /home/abuser/.local
+COPY --chown=abuser:abuser app/ /app/
+
+USER abuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "1", "--worker-tmp-dir", "/dev/shm", "app:app"]
